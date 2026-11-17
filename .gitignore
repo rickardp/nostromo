@@ -1,0 +1,8 @@
+/target
+.DS_Store
+
+# Local experiments, workload receipts, and generated evidence stay out of Git.
+/research/
+/docs/research/
+/.local/
+__pycache__/
