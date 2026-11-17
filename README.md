@@ -11,10 +11,10 @@ cache and clears idle caches when space runs low. Keep using `cargo build`, `car
 
 ## Get started
 
-From this checkout, with Rust 1.98 or newer:
+Install the latest release from [crates.io](https://crates.io/crates/nostromo) with Rust 1.98 or newer:
 
 ```sh
-cargo install --path .
+cargo install nostromo
 nostromo init
 nostromo doctor
 ```

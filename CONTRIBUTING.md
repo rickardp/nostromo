@@ -21,6 +21,19 @@ versions used by Nostromo to be present in Cargo's local cache.
 Keep workload-specific reports, receipts, measurements, and experiments outside the checkout.
 The `research/`, `docs/research/`, and `.local/` paths are ignored if used for local scratch work.
 
+## Install from a local checkout
+
+To try your changes with Cargo, run from the repository root:
+
+```sh
+cargo install --path .
+nostromo init
+nostromo doctor
+```
+
+On macOS, the store must support CoW (normally APFS). To explicitly accept basic mode without
+cache reuse, use `nostromo init --allow-no-cow`.
+
 ## Design and behavior
 
 - [Design specification](docs/SPEC.md)
