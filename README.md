@@ -34,4 +34,18 @@ nostromo gc --dry-run    # preview cleanup
 
 Before removing the binary, run `nostromo init --uninstall` to restore Cargo’s config.
 
+## Troubleshooting
+
+### `nostromo: command not found`
+
+If `cargo install nostromo` succeeded, add Cargo’s binary directory to your `PATH`:
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+nostromo init
+```
+
+For Bash, add the `export` line to `~/.bashrc` to keep it across sessions. If you set
+`CARGO_HOME`, use `$CARGO_HOME/bin` instead of `$HOME/.cargo/bin`.
+
 [Configuration and usage](docs/USAGE.md) · [Contributing](CONTRIBUTING.md) · [Design](docs/SPEC.md)
