@@ -114,6 +114,8 @@ fn auto() -> i32 {
     if !store.build_root().is_dir() {
         return 0;
     }
+    // Housekeeping must not depend on disk pressure or the store exceeding its soft limit.
+    let _ = evict::cleanup_skeletons(&store);
     if let (Ok(st), Ok(l)) = (util::statfs(&store.root), cfg.limits())
         && st.avail < l.min_free
     {

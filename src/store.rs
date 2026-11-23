@@ -251,19 +251,32 @@ const SKELETON_FILES: &[&str] = &[".cargo-build-lock", ".cargo-lock", ".rustc_in
 /// `.rustc_info.json` and `CACHEDIR.TAG`. Eviction leaves such a skeleton (the lock files stay
 /// in place so a cargo waiting on one is never split from the dir), and seeding fills it.
 pub fn is_unpopulated(build_dir: &Path) -> bool {
-    fn walk(d: &Path, depth: u32) -> bool {
-        let Ok(rd) = std::fs::read_dir(d) else { return true };
-        for e in rd.flatten() {
-            let Ok(t) = e.file_type() else { return false };
-            if t.is_dir() {
-                if depth >= 4 || !walk(&e.path(), depth + 1) {
-                    return false;
-                }
-            } else if !SKELETON_FILES.iter().any(|n| e.file_name() == *n) {
-                return false;
-            }
+    skeleton_last_modified(build_dir).is_some()
+        || std::fs::symlink_metadata(build_dir).is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+}
+
+/// Newest mtime of a trivial skeleton, including every descendant. Unknown files, symlinks,
+/// excessive nesting and inspection errors make it ineligible for hiding or automatic removal.
+pub fn skeleton_last_modified(build_dir: &Path) -> Option<u64> {
+    fn walk(path: &Path, depth: u32) -> Option<u64> {
+        let meta = std::fs::symlink_metadata(path).ok()?;
+        if !meta.is_dir() { return None; }
+        let mut newest = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+        for entry in std::fs::read_dir(path).ok()? {
+            let entry = entry.ok()?;
+            let meta = entry.metadata().ok()?;
+            let kind = entry.file_type().ok()?;
+            let modified = if kind.is_dir() {
+                if depth >= 4 { return None; }
+                walk(&entry.path(), depth + 1)?
+            } else if kind.is_file() && SKELETON_FILES.iter().any(|name| entry.file_name() == *name) {
+                meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()
+            } else {
+                return None;
+            };
+            newest = newest.max(modified);
         }
-        true
+        Some(newest)
     }
     walk(build_dir, 0)
 }
@@ -290,6 +303,33 @@ pub fn last_mtime(dir: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skeleton_detection_rejects_symlinks_and_unreadable_directories() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("nostromo-skeleton-detection-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("debug")).unwrap();
+        let file = root.join(".rustc_info.json");
+        std::fs::write(&file, b"{}").unwrap();
+        assert!(skeleton_last_modified(&root).is_some());
+        assert!(is_unpopulated(&root.join("missing")));
+        assert!(skeleton_last_modified(&root.join("missing")).is_none());
+        std::fs::remove_file(&file).unwrap();
+        symlink("missing", &file).unwrap();
+        assert!(!is_unpopulated(&root));
+        std::fs::remove_file(&file).unwrap();
+        let link = root.join("debug/link");
+        symlink(&root, &link).unwrap();
+        assert!(!is_unpopulated(&root));
+        std::fs::remove_file(link).unwrap();
+        let debug = root.join("debug");
+        std::fs::set_permissions(&debug, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root can bypass permissions; on regular user accounts inspection must fail closed.
+        if unsafe { libc::geteuid() } != 0 { assert!(!is_unpopulated(&root)); }
+        std::fs::set_permissions(&debug, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn layout_and_records() {

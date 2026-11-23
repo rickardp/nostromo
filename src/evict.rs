@@ -115,7 +115,11 @@ pub fn run_with(store: &Store, cfg: &Config, trigger: Trigger, dry_run: bool, op
         }
     };
 
-    // 1. Leftover trash.
+    if !dry_run {
+        sweep_skeletons(store);
+    }
+
+    // 1. Leftover trash, including skeletons retired in this pass.
     // A trash entry that cannot be deleted must not stop eviction of build-dirs.
     out.trash_freed = if dry_run { trash_bytes(store) } else { purge_trash(store).unwrap_or(0) };
     out.freed += out.trash_freed;
@@ -125,10 +129,6 @@ pub fn run_with(store: &Store, cfg: &Config, trigger: Trigger, dry_run: bool, op
     let now = util::now_secs();
     let min_idle = cfg.min_idle.as_secs();
     let ignore_idle = trigger == Trigger::MinFree;
-
-    if !dry_run {
-        sweep_skeletons(store);
-    }
 
     // Candidates and protection. Skeletons hold nothing worth evicting.
     let dirs: Vec<PathBuf> = store.build_dirs().into_iter().filter(|d| !crate::store::is_unpopulated(d)).collect();
@@ -330,23 +330,41 @@ fn evict_one(store: &Store, bd: &Path, dry_run: bool) -> io::Result<Evicted> {
     Ok(if busy && moved.is_empty() { Evicted::Busy } else { Evicted::Done })
 }
 
-/// Removes skeleton build-dirs (see [`crate::store::is_unpopulated`]) untouched for 7 days whose
-/// locks are free, and their markers.
+/// Light housekeeping on every automatic maintenance tick, even below the disk limits.
+/// Uses the same eviction lock as a full eviction pass. Does not evict populated caches.
+pub fn cleanup_skeletons(store: &Store) -> io::Result<()> {
+    let Some(_evict_lock) = locks::try_lock(&store.evict_lock_path(), Mode::Exclusive, true)? else {
+        return Ok(());
+    };
+    sweep_skeletons(store);
+    purge_trash(store)?;
+    Ok(())
+}
+
+/// Retire trivial skeletons untouched for seven days, with no active Cargo build or seeding.
+/// Recheck contents and all use timestamps under the locks before moving to trash.
 fn sweep_skeletons(store: &Store) {
     const WEEK: u64 = 7 * 24 * 3600;
+    let cutoff = util::now_secs().saturating_sub(WEEK);
     for bd in store.build_dirs() {
-        if !crate::store::is_unpopulated(&bd) || crate::store::last_mtime(&bd) + WEEK > util::now_secs() {
-            continue;
-        }
-        let used = crate::store::used_path(&bd);
-        if util::age_secs(&used).is_some_and(|a| a < WEEK) {
-            continue;
-        }
-        let Ok(Some(_idle)) = locks::try_lock_idle(&bd) else { continue };
+        let old_skeleton = || crate::store::skeleton_last_modified(&bd).is_some_and(|t| t <= cutoff)
+            && store.record_or_synth(&bd).last_used <= cutoff;
+        if !old_skeleton() { continue; }
+        let seed_path = store.meta_dir().join(format!("seed-{}.lock", util::path_id(&bd)));
+        let Ok(Some(_seed)) = locks::try_lock(&seed_path, Mode::Exclusive, true) else { continue };
+        let Ok(Some(idle)) = locks::try_lock_idle(&bd) else { continue };
+        if !old_skeleton() { continue; }
+        // A newly added Cargo profile must be included in the lock set too.
+        let held: Vec<_> = idle.cargo_rel(&bd).into_iter().map(|p| bd.join(p)).collect();
+        if locks::cargo_lock_files(&bd) != held { continue; }
         if let Ok(dst) = new_trash_entry(store, &bd) {
-            let _ = std::fs::rename(&bd, dst.join("bd"));
-            let _ = std::fs::remove_file(&used);
-            let _ = store.remove_record(&bd);
+            if std::fs::rename(&bd, dst.join("bd")).is_ok() {
+                let _ = std::fs::remove_file(crate::store::used_path(&bd));
+                let _ = store.remove_record(&bd);
+            } else {
+                // A failed move must leave the live directory's tracking metadata intact.
+                let _ = std::fs::remove_dir(dst);
+            }
         }
     }
 }

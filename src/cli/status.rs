@@ -39,7 +39,11 @@ pub fn main(args: &[String]) -> i32 {
         }
     };
     let limits = cfg.limits_for(st.total);
-    let dirs = store.build_dirs();
+    // An idle skeleton has no reusable build state. Keep busy or uninspectable directories
+    // visible; status is read-only and never removes even an old skeleton.
+    let dirs: Vec<_> = store.build_dirs().into_iter().filter(|d| {
+        !crate::store::is_unpopulated(d) || !matches!(locks::try_lock_idle(d), Ok(Some(_)))
+    }).collect();
     let mut recs: Vec<_> = dirs.iter().map(|d| store.record_or_synth(d)).collect();
     recs.sort_by_key(|r| std::cmp::Reverse(r.last_used));
 

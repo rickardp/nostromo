@@ -224,7 +224,12 @@ Steps, until the target is met:
    profile dir meanwhile), its entry is moved back.
 2. Remove the record and the `.nostromo-used` marker, release the locks, delete the trash entry.
    Deletion retries on `ENOTEMPTY`, because Finder and Spotlight write `.DS_Store` files.
-3. Skeletons untouched for 7 days whose locks are free are removed.
+3. Skeletons untouched for 7 days whose Cargo and seeding locks are free are removed. This
+   housekeeping runs on every automatic maintenance tick even below the disk limits, as well
+   as during manual GC. Age includes nested files, the usage marker and the tracking record;
+   contents and age are rechecked under the locks. Unknown files, symlinks and inspection errors
+   prevent classification as a trivial skeleton. Tracking metadata is removed only after a
+   successful move to trash, which is deleted in the same pass.
 
 The next build in a skeleton probes (its `.rustc_info.json` went to the trash), so the probe hook
 re-seeds it from a sibling.
@@ -286,6 +291,8 @@ The store root gets `.metadata_never_index`.
   CoW/basic mode and explicit macOS consent; free space.
 - **`nostromo status [--scan]`**: footprint against `max_size`, free space against
   `min_free_space`, pending warnings, build-dirs by last use (in use / orphan).
+  Idle trivial skeletons are omitted from rows and footprint totals; busy or uninspectable
+  directories and populated caches without workspace records remain visible. Status is read-only.
 - **`nostromo gc [--dry-run] [--to <size>]`**: runs eviction now. **`gc --auto`**: one build-triggered maintenance tick.
 
 ## Testing

@@ -60,6 +60,12 @@ space reclaimed; sparse files and APFS clones make the distinction matter.
 After an external clean, missing build-dirs are excluded from Nostromo's cached size totals.
 Their index records may remain for inspection and future reuse.
 
+Idle directories containing only Cargo locks and probe metadata are hidden from `status`.
+They are removed after seven days without use when their Cargo and seeding locks are free.
+This housekeeping runs during build-triggered maintenance even below the disk limits, or during
+manual `nostromo gc`. Status and dry runs never remove them. Untracked caches containing build
+artifacts remain visible as `orphan (unknown)`.
+
 ## Configure
 
 `~/.config/nostromo/config.toml`, every key optional:
