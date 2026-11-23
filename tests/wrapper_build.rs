@@ -75,6 +75,36 @@ fn init_build_seed_evict_reseed() {
     assert!(!cow || comp.iter().all(|c| WS_CRATES.contains(&c.as_str())), "{comp:?}");
     assert_eq!(app(&wt1), cold);
 
+    // End-to-end housekeeping: real eviction skeletons disappear from status, then an
+    // automatic tick retires them below the disk limits, and plain Cargo builds cold again.
+    h.write_config("max_size = \"100%\"\nmin_free_space = \"0\"\nmin_idle = \"0\"\nkeep_recent = 0\nmin_eviction_gain = \"0\"\n");
+    run_ok(h.nostromo(&["gc", "--to", "0"]));
+    for bd in [&bd1, &bd2] { assert!(store::is_unpopulated(bd)); }
+    let status = run_ok(h.nostromo(&["status"]));
+    assert!(String::from_utf8_lossy(&status.stdout).contains("no build-dirs"));
+    assert!(bd1.exists() && bd2.exists(), "status only hides skeletons");
+    fn age_skeleton(path: &Path) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                age_skeleton(&entry.unwrap().path());
+            }
+        }
+        let old = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+        std::fs::File::open(path).unwrap().set_modified(old).unwrap();
+    }
+    for bd in [&bd1, &bd2] { age_skeleton(bd); }
+    let cleanup = run_ok(h.nostromo(&["gc", "--auto"]));
+    assert!(cleanup.stdout.is_empty() && cleanup.stderr.is_empty());
+    assert!(!bd1.exists() && !bd2.exists());
+    assert!(st.records().is_empty());
+    assert_eq!(std::fs::read_dir(st.trash_dir()).unwrap().count(), 0);
+    run_ok(h.cargo(&wt1, &["build", "--offline"]));
+    assert_eq!(app(&wt1), cold);
+    assert!(st.load_record(&bd1).unwrap().seeded_from.is_none(), "both donors were retired");
+    run_ok(h.cargo(&wt1, &["test", "--offline"]));
+    let run = run_ok(h.cargo(&wt1, &["run", "--offline", "--quiet", "-p", "app"]));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), cold);
+
     // Uninstall restores the Cargo config.
     run_ok(h.nostromo(&["init", "--uninstall"]));
     let cfg = std::fs::read_to_string(h.home.join(".cargo/config.toml")).unwrap();

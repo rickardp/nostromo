@@ -1,9 +1,9 @@
 [package]
 name = "nostromo"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.98"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Managed Cargo build storage on macOS and Linux, with optional APFS CoW reuse"
 keywords = ["cargo", "build-cache", "worktree", "apfs"]
 categories = ["development-tools::cargo-plugins"]
