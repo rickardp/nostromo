@@ -65,3 +65,13 @@ create GitHub prereleases.
 If publishing succeeds but creating the GitHub release fails, rerun the failed workflow jobs.
 An existing crates.io version is left unchanged, and an existing GitHub release is not recreated.
 Version `0.1.0` is already on crates.io; tagging it will create only the GitHub release after tests pass.
+
+If a runner failure requires a workflow fix, push the fix to `main` and dispatch the updated
+workflow against the existing release tag, without changing the tag or crate version:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.2
+```
+
+Both tests and publication check out that exact tag. macOS CI uses `macos-15-intel` to avoid
+the arm64 hosted-runner capacity delays encountered during the `0.1.2` release.
